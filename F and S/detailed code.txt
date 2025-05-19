@@ -1,0 +1,69 @@
+import cv2
+import numpy as np
+
+# Open webcam
+cap = cv2.VideoCapture(0)
+
+if not cap.isOpened():
+    print("Error: Cannot access the camera")
+    exit()
+
+# Optional: Background subtraction for better smoke detection
+backSub = cv2.createBackgroundSubtractorMOG2()
+
+while True:
+    ret, frame = cap.read()
+    if not ret:
+        break
+
+    frame = cv2.resize(frame, (640, 480))
+
+    # -------------------- FIRE DETECTION --------------------
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+
+    # Extended range for fire (yellow to red)
+    lower_fire = np.array([0, 50, 50])
+    upper_fire = np.array([40, 255, 255])
+    fire_mask = cv2.inRange(hsv, lower_fire, upper_fire)
+
+    # Morphological filtering to remove small noise
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+    fire_mask = cv2.morphologyEx(fire_mask, cv2.MORPH_OPEN, kernel)
+
+    fire_contours, _ = cv2.findContours(fire_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    for cnt in fire_contours:
+        area = cv2.contourArea(cnt)
+        if area > 1000:  # ignore small blobs
+            x, y, w, h = cv2.boundingRect(cnt)
+            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 0, 255), 2)
+            cv2.putText(frame, "🔥 Fire", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.8, (0, 0, 255), 2)
+
+    # -------------------- SMOKE DETECTION --------------------
+    # Use background subtraction to detect motion-like smoke
+    fg_mask = backSub.apply(frame)
+
+    # Blur + threshold to reduce false detection
+    blurred = cv2.GaussianBlur(fg_mask, (15, 15), 0)
+    _, smoke_mask = cv2.threshold(blurred, 200, 255, cv2.THRESH_BINARY)
+
+    # Morphological cleanup
+    smoke_mask = cv2.morphologyEx(smoke_mask, cv2.MORPH_CLOSE, kernel)
+
+    smoke_contours, _ = cv2.findContours(smoke_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    for cnt in smoke_contours:
+        area = cv2.contourArea(cnt)
+        if area > 3000:
+            x, y, w, h = cv2.boundingRect(cnt)
+            cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0), 2)
+            cv2.putText(frame, "💨 Smoke", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.8, (255, 0, 0), 2)
+
+    # -------------------- SHOW RESULT --------------------
+    cv2.imshow("🔥 Fire and 💨 Smoke Detection", frame)
+
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+cap.release()
+cv2.destroyAllWindows()
